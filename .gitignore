@@ -1,0 +1,12 @@
+# macOS
+.DS_Store
+
+# Build artifacts
+iPhoneMirror.app/
+*.o
+
+# Scratch files
+test_*.swift
+list_*.swift
+fix_app.swift
+compile_error.txt
