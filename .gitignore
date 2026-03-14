@@ -10,3 +10,6 @@ test_*.swift
 list_*.swift
 fix_app.swift
 compile_error.txt
+
+# Release Packages
+*.dmg
