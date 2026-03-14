@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>iPhoneMirror</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.example.iPhoneMirror</string>
+    <key>CFBundleName</key>
+    <string>iPhone Mirror</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>11.0</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSCameraUsageDescription</key>
+    <string>This app requires camera access to capture your iPhone screen.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>This app requires microphone access to capture your iPhone audio.</string>
+</dict>
+</plist>

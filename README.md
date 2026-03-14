@@ -45,13 +45,18 @@ This app is a standalone Swift file designed for rapid compilation without needi
 **Compilation Command:**
 
 ```bash
-# 1. Compile the app package
+# 1. Create the app bundle structure
+mkdir -p iPhoneMirror.app/Contents/MacOS
+mkdir -p iPhoneMirror.app/Contents/Resources
+
+# 2. Compile the app package
 swiftc MirrorApp.swift -parse-as-library -o iPhoneMirror.app/Contents/MacOS/iPhoneMirror
 
-# 2. Copy the App Icon into the Resources folder
+# 3. Copy resources
+cp Info.plist iPhoneMirror.app/Contents/
 cp AppIcon.icns iPhoneMirror.app/Contents/Resources/
 
-# 3. Re-sign the app so macOS allows it to access cameras/hardware
+# 4. Re-sign the app so macOS allows it to access cameras/hardware
 codesign --sign - --force --deep iPhoneMirror.app
 ```
 
@@ -94,13 +99,18 @@ codesign --sign - --force --deep iPhoneMirror.app
 本專案只有一支 SwiftUI 程式碼，不依賴龐大的 Xcode 專案即可獨立編譯。確保 Mac 有安裝 Xcode 指令列工具後執行：
 
 ```bash
-# 1. 編譯二進位執行檔到 bundle 中
+# 1. 建立 App Bundle 資料夾結構
+mkdir -p iPhoneMirror.app/Contents/MacOS
+mkdir -p iPhoneMirror.app/Contents/Resources
+
+# 2. 編譯二進位執行檔到 bundle 中
 swiftc MirrorApp.swift -parse-as-library -o iPhoneMirror.app/Contents/MacOS/iPhoneMirror
 
-# 2. 複製圖示檔到 Bundle 中
+# 3. 複製配置檔與圖示到 Bundle 中
+cp Info.plist iPhoneMirror.app/Contents/
 cp AppIcon.icns iPhoneMirror.app/Contents/Resources/
 
-# 3. 重新給予本機簽名（非常重要，不簽名 macOS 不會放行其讀取攝影機）
+# 4. 重新給予本機簽名（非常重要，不簽名 macOS 不會放行其讀取攝影機）
 codesign --sign - --force --deep iPhoneMirror.app
 ```
 
