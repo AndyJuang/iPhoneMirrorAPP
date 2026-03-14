@@ -155,14 +155,14 @@ struct ContentView: View {
                                 VStack {
                                     HStack {
                                         Spacer()
-                                        HStack {
-                                            Circle().fill(Color.red).frame(width: 10, height: 10)
-                                            Text("REC").font(.system(size: 14, weight: .bold)).foregroundColor(.red)
-                                        }
-                                        .padding(8)
-                                        .background(Color.black.opacity(0.6))
-                                        .cornerRadius(8)
-                                        .padding()
+                                        Text("\(gifRecorder.timeRemaining)s")
+                                            .font(.system(size: 24, weight: .bold, design: .monospaced))
+                                            .foregroundColor(.white)
+                                            .padding(.horizontal, 16)
+                                            .padding(.vertical, 8)
+                                            .background(Color.black.opacity(0.6))
+                                            .cornerRadius(8)
+                                            .padding()
                                     }
                                     Spacer()
                                 }
@@ -205,9 +205,11 @@ struct ContentView: View {
 
 class GifRecorder: NSObject, ObservableObject, SCStreamOutput {
     @Published var isRecording = false
+    @Published var timeRemaining: Int = 5
     private var images: [CGImage] = []
     private var stream: SCStream?
     private var lastFrameTime: TimeInterval = 0
+    private var countdownTimer: Timer?
     
     func toggleRecording() {
         if isRecording {
@@ -220,6 +222,7 @@ class GifRecorder: NSObject, ObservableObject, SCStreamOutput {
     private func startRecording() {
         images.removeAll()
         lastFrameTime = 0
+        timeRemaining = 5
         
         SCShareableContent.getExcludingDesktopWindows(true, onScreenWindowsOnly: true) { [weak self] content, error in
             guard let self = self, let content = content else {
@@ -248,6 +251,7 @@ class GifRecorder: NSObject, ObservableObject, SCStreamOutput {
                 DispatchQueue.main.async {
                     if error == nil {
                         self.isRecording = true
+                        self.startCountdown()
                     } else {
                         self.isRecording = false
                     }
@@ -256,8 +260,23 @@ class GifRecorder: NSObject, ObservableObject, SCStreamOutput {
         }
     }
     
+    private func startCountdown() {
+        countdownTimer?.invalidate()
+        countdownTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            if self.timeRemaining > 0 {
+                self.timeRemaining -= 1
+            }
+            if self.timeRemaining <= 0 {
+                self.stopRecording()
+            }
+        }
+    }
+    
     private func stopRecording() {
         isRecording = false
+        countdownTimer?.invalidate()
+        countdownTimer = nil
         stream?.stopCapture()
         stream = nil
         
