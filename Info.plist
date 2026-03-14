@@ -24,5 +24,7 @@
     <string>This app requires camera access to capture your iPhone screen.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>This app requires microphone access to capture your iPhone audio.</string>
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>This app requires screen recording permission to create GIFs from its own window.</string>
 </dict>
 </plist>

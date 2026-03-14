@@ -1,6 +1,10 @@
 import SwiftUI
 import AVFoundation
 import CoreMediaIO
+import ImageIO
+import UniformTypeIdentifiers
+import ScreenCaptureKit
+import VideoToolbox
 
 @main
 struct iPhoneMirrorApp: App {
@@ -49,6 +53,15 @@ struct iPhoneMirrorApp: App {
                         }
                     }
                 }
+            }
+            
+            CommandMenu("Record") {
+                Button(action: {
+                    NotificationCenter.default.post(name: NSNotification.Name("ToggleRecording"), object: nil)
+                }) {
+                    Text("Start / Stop GIF Recording")
+                }
+                .keyboardShortcut("r", modifiers: [.command])
             }
         }
     }
@@ -120,6 +133,7 @@ struct ClickAnimationView: View {
 
 struct ContentView: View {
     @ObservedObject var captureManager: CaptureManager
+    @StateObject private var gifRecorder = GifRecorder()
     @AppStorage("SelectedAnimation") private var selectedAnimation: AnimationType = .cursor
     @State private var taps: [TapData] = []
     
@@ -136,10 +150,30 @@ struct ContentView: View {
                             ForEach(taps) { tap in
                                 ClickAnimationView(tap: tap, type: selectedAnimation)
                             }
+                            
+                            if gifRecorder.isRecording {
+                                VStack {
+                                    HStack {
+                                        Spacer()
+                                        HStack {
+                                            Circle().fill(Color.red).frame(width: 10, height: 10)
+                                            Text("REC").font(.system(size: 14, weight: .bold)).foregroundColor(.red)
+                                        }
+                                        .padding(8)
+                                        .background(Color.black.opacity(0.6))
+                                        .cornerRadius(8)
+                                        .padding()
+                                    }
+                                    Spacer()
+                                }
+                            }
                         }
                     )
+                    .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ToggleRecording"))) { _ in
+                        gifRecorder.toggleRecording()
+                    }
                     .gesture(
-                        selectedAnimation == .none ? nil :
+                        selectedAnimation == .none && !gifRecorder.isRecording ? nil :
                         DragGesture(minimumDistance: 0)
                             .onEnded { value in
                                 let tap = TapData(location: value.location)
@@ -166,6 +200,103 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 200, minHeight: 200)
+    }
+}
+
+class GifRecorder: NSObject, ObservableObject, SCStreamOutput {
+    @Published var isRecording = false
+    private var images: [CGImage] = []
+    private var stream: SCStream?
+    private var lastFrameTime: TimeInterval = 0
+    
+    func toggleRecording() {
+        if isRecording {
+            stopRecording()
+        } else {
+            startRecording()
+        }
+    }
+    
+    private func startRecording() {
+        images.removeAll()
+        lastFrameTime = 0
+        
+        SCShareableContent.getExcludingDesktopWindows(true, onScreenWindowsOnly: true) { [weak self] content, error in
+            guard let self = self, let content = content else {
+                DispatchQueue.main.async { self?.isRecording = false }
+                return
+            }
+            
+            // Find our app's window
+            guard let app = content.applications.first(where: { $0.processID == pid_t(ProcessInfo.processInfo.processIdentifier) }),
+                  let window = content.windows.first(where: { $0.owningApplication?.processID == app.processID }) else {
+                DispatchQueue.main.async { self.isRecording = false }
+                return
+            }
+            
+            let filter = SCContentFilter(desktopIndependentWindow: window)
+            let config = SCStreamConfiguration()
+            config.width = Int(window.frame.width * 2) // Retina scale
+            config.height = Int(window.frame.height * 2)
+            config.minimumFrameInterval = CMTime(value: 1, timescale: 10)
+            config.showsCursor = true
+            
+            let stream = SCStream(filter: filter, configuration: config, delegate: nil)
+            self.stream = stream
+            try? stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: .main)
+            stream.startCapture() { error in
+                DispatchQueue.main.async {
+                    if error == nil {
+                        self.isRecording = true
+                    } else {
+                        self.isRecording = false
+                    }
+                }
+            }
+        }
+    }
+    
+    private func stopRecording() {
+        isRecording = false
+        stream?.stopCapture()
+        stream = nil
+        
+        guard !images.isEmpty else { return }
+        
+        let path = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0].appendingPathComponent("MirrorRecording-\(Int(Date().timeIntervalSince1970)).gif")
+        
+        guard let dest = CGImageDestinationCreateWithURL(path as CFURL, UTType.gif.identifier as CFString, images.count, nil) else { return }
+        
+        let frameProp = [kCGImagePropertyGIFDictionary as String: [kCGImagePropertyGIFDelayTime as String: 0.1]]
+        let gifProp = [kCGImagePropertyGIFDictionary as String: [kCGImagePropertyGIFLoopCount as String: 0]]
+        
+        CGImageDestinationSetProperties(dest, gifProp as CFDictionary)
+        
+        for img in images {
+            CGImageDestinationAddImage(dest, img, frameProp as CFDictionary)
+        }
+        
+        if CGImageDestinationFinalize(dest) {
+            NSWorkspace.shared.activateFileViewerSelecting([path])
+        }
+    }
+    
+    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+        guard type == .screen,
+              let pixelBuffer = sampleBuffer.imageBuffer else { return }
+        
+        let currentTime = Date().timeIntervalSince1970
+        guard currentTime - lastFrameTime >= 0.1 else { return }
+        lastFrameTime = currentTime
+        
+        var cgImage: CGImage?
+        VTCreateCGImageFromCVPixelBuffer(pixelBuffer, options: nil, imageOut: &cgImage)
+        
+        if let cgImage = cgImage {
+            DispatchQueue.main.async {
+                self.images.append(cgImage)
+            }
+        }
     }
 }
 
