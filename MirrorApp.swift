@@ -340,6 +340,7 @@ class CaptureManager: NSObject, ObservableObject, AVCaptureVideoDataOutputSample
     private var videoDiscoverySession: AVCaptureDevice.DiscoverySession!
     private var muxedDiscoverySession: AVCaptureDevice.DiscoverySession!
     private let videoDataOutput = AVCaptureVideoDataOutput()
+    private let captureQueue = DispatchQueue(label: "com.example.iPhoneMirror.captureQueue", qos: .userInitiated)
     
     override init() {
         enableScreenCaptureDevices()
@@ -393,7 +394,10 @@ class CaptureManager: NSObject, ObservableObject, AVCaptureVideoDataOutputSample
 
     
     @objc func devicesChanged(_ notification: Notification) {
-        DispatchQueue.main.async {
+        // 重新連接時給 CoreMediaIO 0.5 秒讓裝置完整出現在 discovery session，
+        // 否則 setupSession() 會找不到裝置而把畫面變成黑底。
+        let delay: TimeInterval = notification.name == AVCaptureDevice.wasConnectedNotification ? 0.5 : 0.0
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
             self.availableDevices = CaptureManager.getAllDevices(videoSession: self.videoDiscoverySession, muxedSession: self.muxedDiscoverySession)
             self.setupSession()
         }
@@ -429,6 +433,12 @@ class CaptureManager: NSObject, ObservableObject, AVCaptureVideoDataOutputSample
         if let device = selectedDevice, let input = try? AVCaptureDeviceInput(device: device) {
             if session.canAddInput(input) {
                 session.addInput(input)
+                // Muxed 裝置同時包含 video 與 audio port。
+                // 停用 audio port 讓 CoreAudio 不鎖住 iPhone 麥克風，
+                // 其他 app 或錄音執行緒才能自由取用。
+                for port in input.ports where port.mediaType == .audio {
+                    port.isEnabled = false
+                }
                 hasDevice = true
                 print("Added input: \(device.localizedName)")
             } else {
@@ -443,18 +453,22 @@ class CaptureManager: NSObject, ObservableObject, AVCaptureVideoDataOutputSample
         if session.canAddOutput(videoDataOutput) {
             session.addOutput(videoDataOutput)
             videoDataOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA)]
-            videoDataOutput.setSampleBufferDelegate(self, queue: DispatchQueue(label: "videoQueue"))
+            videoDataOutput.setSampleBufferDelegate(self, queue: captureQueue)
         }
 
         session.sessionPreset = .high
         session.commitConfiguration()
-        
-        if hasDevice && !session.isRunning {
-            DispatchQueue.global(qos: .userInitiated).async {
-                self.session.startRunning()
+
+        // startRunning/stopRunning 都放到背景執行，避免快速 disconnect/reconnect 時
+        // 主執行緒的呼叫順序與背景任務交叉導致 session 應啟動卻已被停止。
+        if hasDevice {
+            if !session.isRunning {
+                captureQueue.async { self.session.startRunning() }
             }
-        } else if !hasDevice && session.isRunning {
-            session.stopRunning()
+        } else {
+            if session.isRunning {
+                captureQueue.async { self.session.stopRunning() }
+            }
         }
     }
     
@@ -473,32 +487,45 @@ class CaptureManager: NSObject, ObservableObject, AVCaptureVideoDataOutputSample
 }
 
 class PreviewNSView: NSView {
-    var previewLayer: AVCaptureVideoPreviewLayer?
     var videoSize: CGSize = .zero {
         didSet {
             guard videoSize.width > 0 && videoSize.height > 0, oldValue != videoSize else { return }
             adjustWindowAspect()
         }
     }
-    
+
+    // AVCaptureVideoPreviewLayer 作為 backing layer，避免 sublayer frame 在
+    // layout() 前為 zero 導致黑畫面（在 macOS 26 上更容易觸發）。
+    override func makeBackingLayer() -> CALayer {
+        let layer = AVCaptureVideoPreviewLayer()
+        layer.videoGravity = .resizeAspect
+        layer.backgroundColor = NSColor.black.cgColor
+        return layer
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        wantsLayer = true
+    }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         self.window?.isMovableByWindowBackground = true
         adjustWindowAspect()
     }
-    
-    override func layout() {
-        super.layout()
-        previewLayer?.frame = bounds
-    }
-    
+
     private func adjustWindowAspect() {
         guard let window = self.window, videoSize.width > 0 && videoSize.height > 0 else { return }
         window.contentAspectRatio = videoSize
-        
+
         var currentFrame = window.frame
         let newWidth = currentFrame.height * (videoSize.width / videoSize.height)
-        
+
         if abs(currentFrame.width - newWidth) > 1 {
             let dx = (currentFrame.width - newWidth) / 2
             currentFrame.size.width = newWidth
@@ -511,21 +538,15 @@ class PreviewNSView: NSView {
 struct PreviewView: NSViewRepresentable {
     let session: AVCaptureSession
     let videoSize: CGSize
-    
+
     func makeNSView(context: Context) -> PreviewNSView {
         let view = PreviewNSView()
-        view.wantsLayer = true
-        view.layer?.backgroundColor = NSColor.black.cgColor
-        
-        let previewLayer = AVCaptureVideoPreviewLayer(session: session)
-        previewLayer.videoGravity = .resizeAspect
-        view.layer?.addSublayer(previewLayer)
-        view.previewLayer = previewLayer
+        (view.layer as? AVCaptureVideoPreviewLayer)?.session = session
         return view
     }
-    
+
     func updateNSView(_ nsView: PreviewNSView, context: Context) {
-        nsView.previewLayer?.session = session
+        (nsView.layer as? AVCaptureVideoPreviewLayer)?.session = session
         nsView.videoSize = videoSize
     }
 }
